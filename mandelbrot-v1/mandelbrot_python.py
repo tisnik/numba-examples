@@ -18,8 +18,7 @@ from sys import argv, exit
 
 def calc_mandelbrot(width, height, maxiter, palette):
     print("P3")
-    print(width)
-    print(height)
+    print("{w} {h}".format(w=width, h=height))
     print("255")
 
     cy = -1.5
@@ -41,9 +40,7 @@ def calc_mandelbrot(width, height, maxiter, palette):
             r = palette[i][0]
             g = palette[i][1]
             b = palette[i][2]
-            print(r)
-            print(g)
-            print(b)
+            print("{r} {g} {b}".format(r=r, g=g, b=b))
             cx += 3.0/width
         cy += 3.0/height
 
