@@ -1,0 +1,1197 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+        "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html>
+<head>
+<title>Projekt Numba aneb další přístup k překladu Pythonu do nativního kódu</title>
+<meta name="Author" content="Pavel Tisnovsky" />
+<meta name="Generator" content="vim" />
+<meta http-equiv="content-type" content="text/html; charset=utf-8" />
+<style type="text/css">
+         body {color:#000000; background:#ffffff;}
+         h1  {font-family: arial, helvetica, sans-serif; color:#ffffff; background-color:#c00000; text-align:center; padding-left:1em}
+         h2  {font-family: arial, helvetica, sans-serif; color:#ffffff; background-color:#0000c0; padding-left:1em; text-align:left}
+         h3  {font-family: arial, helvetica, sans-serif; color:#000000; background-color:#c0c0c0; padding-left:1em; text-align:left}
+         h4  {font-family: arial, helvetica, sans-serif; color:#000000; background-color:#e0e0e0; padding-left:1em; text-align:left}
+         a   {font-family: arial, helvetica, sans-serif;}
+         li  {font-family: arial, helvetica, sans-serif; color:#000000; text-align:justify; width:450px;}
+         ol  {font-family: arial, helvetica, sans-serif; color:#000000; text-align:justify; width:450px;}
+         ul  {font-family: arial, helvetica, sans-serif; color:#000000; text-align:justify; width:450px;}
+         p   {font-family: arial, helvetica, sans-serif; color:#000000; text-align:justify;}
+         pre {background:#e0e0e0}
+</style>
+</head>
+
+<body>
+
+<h1>Projekt Numba aneb další přístup k překladu Pythonu do nativního kódu</h1>
+
+<h3>Pavel Tišnovský</h3>
+
+<p></p>
+
+<h1>Úvodník</h1>
+
+<p>Po představení projektů RPython a Cython se zaměříme na další nástroj určený pro překlad zdrojových kódů z Pythonu do nativního kódu (či dokonce pro GPU). Tento nástroj se jmenuje Numba a mezi jeho přednosti patří velmi snadné použití.</p>
+
+
+
+<h2>Obsah</h2>
+
+<p><a href="#k01">1. Projekt Numba aneb další přístup k překladu Pythonu do nativního kódu</a></p>
+<p><a href="#k02">2. Princip činnosti Numba při překladu</a></p>
+<p><a href="#k03">3. Instalace nástroje Numba</a></p>
+<p><a href="#k04">4. Kontrola korektní instalace</a></p>
+<p><a href="#k05">5. Označení funkcí, které se mají překládat JITem</a></p>
+<p><a href="#k06">6. Testovací benchmark (dnes již naposledy)</a></p>
+<p><a href="#k07">7. Výsledky benchmarku při lineárním zvyšování složitosti výpočtu</a></p>
+<p><a href="#k08">8. Přidání anotace <strong>@jit</strong></a></p>
+<p><a href="#k09">9. Použití zjednodušené varianty funkce <strong>print</strong></a></p>
+<p><a href="#k10">10. Vynucení úplného překladu anotací <strong>@jit(nopython=True)</strong></a></p>
+<p><a href="#k11">11. Porovnání výsledků benchmarků (pouze Numba)</a></p>
+<p><a href="#k12">12. Porovnání s&nbsp;benchmarkem naprogramovaným v&nbsp;optimalizovaném Cythonu a ANSI C</a></p>
+<p><a href="#k13">13. Graf s&nbsp;výsledky všech benchmarků a zhodnocení výsledků</a></p>
+<p><a href="#k14">14. Explicitně zapsané informace o typech (typové signatury)</a></p>
+<p><a href="#k15">15. Specifikace typů polí</a></p>
+<p><a href="#k16">16. Obsah druhé části článku</a></p>
+<p><a href="#k17">17. Repositář s&nbsp;demonstračními příklady a výsledky benchmarků</a></p>
+<p><a href="#k18">18. Odkazy na Internetu</a></p>
+
+
+
+<p><a name="k01"></a></p>
+<h2 id="k01">1. Projekt Numba aneb další přístup k&nbsp;překladu Pythonu do nativního kódu</h2>
+
+<p>V&nbsp;předchozích třech článcích vydaných na serveru Root [<a
+href="https://www.root.cz/clanky/rpython-prekvapive-vykonny-dialekt-pythonu-na-nemz-je-zalozen-pypy/">1</a>],
+[<a
+href="https://www.root.cz/clanky/rpython-vs-cython-aneb-dvoji-pristup-k-prekladu-pythonu-do-nativniho-kodu/">2</a>],
+[<a
+href="https://www.root.cz/clanky/prakticke-pouziti-nastroje-cython-pri-prekladu-pythonu-do-nativniho-kodu-1/">3</a>]
+jsme se ve stručnosti seznámili s&nbsp;projekty nazvanými <i>RPython</i> a
+<i>Cython</i>. Oba projekty mají podobné cíle &ndash; dokážou ze zdrojového
+kódu, který je buď podmnožinou (<i>RPython</i>) nebo naopak nadmnožinou
+(<i>Cython</i>) programovacího jazyka Python vygenerovat nativní (strojový)
+kód, který ve většině případů běží rychleji, než je tomu při použití klasického
+interpretu Pythonu, ať již se jedná o <i>CPython</i> (dnes asi nejčastěji
+používaný), <i>Jython</i> nebo v&nbsp;menší míře o <i>Iron Python</i>. Nástroj
+RPython je součástí projektu PyPy a jeho použití je do větší míry orientováno
+na autory interpretrů a překladačů, než na běžné vývojáře (na což jsou ostatně
+programátoři několikrát upozorněni přímo v&nbsp;dokumentaci).</p>
+
+<p>Liší se však způsob vlastní implementace překladu do nativního kódu. Projekt
+<i>RPython</i> je založený na analýze AST (<i>Abstract Syntax Tree</i>)
+vytvořeného z&nbsp;bajtkódu samotným interpretrem. Z&nbsp;AST se odvozuje <a
+href="https://en.wikipedia.org/wiki/Control_flow_graph">CFG</a> a proto RPython
+navíc vyžaduje použití podmnožiny Pythonu. Je tomu tak z&nbsp;toho důvodu, aby
+RPython dokázal správně odvodit datové typy proměnných a argumentů
+funkcí/metod, a to již v&nbsp;čase překladu, tj.&nbsp;v&nbsp;<i>compile
+time</i>. Nástroj <i>Cython</i> naproti tomu pracuje poněkud odlišně &ndash;
+transformuje zdrojový kód z&nbsp;Pythonu do programovacího jazyka C a používá
+přitom informace o typech dodaných přímo vývojářem do zdrojového kódu (ten má
+tradičně koncovku &bdquo;.pyx&ldquo; a nikoli &bdquo;.py&ldquo;).
+V&nbsp;místech, kde není typ zřejmý, se používá univerzální typ
+<strong>PyObject *</strong>, podobně jako v&nbsp;klasickém interpretru. Záleží
+tedy jen na vývojáři, kterou část kódu bude chtít optimalizovat a které tedy
+bude věnovat větší péči (při deklaraci typů).</p>
+
+
+
+<p><a name="k02"></a></p>
+<h2 id="k02">2. Princip činnosti Numba při překladu</h2>
+
+<p>Princip činnosti nástroje Numba se v&nbsp;několika ohledech odlišuje od
+RPythonu ale i od Cythonu. Numba totiž umožňuje překlad kódu za běhu aplikace,
+tj.&nbsp;v&nbsp;<i>runtime</i>. Jedná se tedy o <a
+href="https://en.wikipedia.org/wiki/Just-in-time_compilation">JIT</a> neboli o
+<i>just-in-time</i> překladač, který má tu výhodu, že dokáže odvodit datové
+typy proměnných a argumentů funkcí na základě skutečného chování aplikace. To
+samozřejmě neznamená, že by JIT již při prvním volání funkce přesně věděl, jak
+má funkci přeložit. Ve skutečnosti se dozví pouze informace o jediné konkrétní
+větvi, kterou může přeložit. V&nbsp;případě, že bude ta samá funkce později
+volána s&nbsp;odlišnými typy parametrů, popř.&nbsp;se její chování změní jiným
+způsobem (Python je velmi dynamický jazyk), provede se just-in-time překlad
+znovu, takže zde zaplatíme za vyšší výpočetní výkon poněkud většími paměťovými
+nároky a pomalejším během prvních volání funkce.</p>
+
+<p>Z&nbsp;pohledu běžného vývojáře je největší předností tohoto způsobu
+překladu fakt, že není zapotřebí samotný zdrojový kód měnit (až na uvedení
+anotace před funkci). Nepříjemný je přesun času překladu do runtime, což sice
+nevadí u aplikací, které běží delší dobu, ovšem u jednorázových skriptů může
+být použití JITu spíše kontraproduktivní. To ostatně uvidíme i na demonstračním
+příkladu.</p>
+
+<p>Samotný překlad je prováděn na několika úrovních, přičemž Numby na nižších
+úrovních využívá možností nabízených LLVM. Jedná se o relativně složitou
+problematiku, které se budeme věnovat v&nbsp;samostatném článku.</p>
+
+<p><div class="rs-tip-major">Poznámka: s&nbsp;JITy jsme se již na stránkách
+Roota setkali, především v&nbsp;souvislosti <a
+href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua/">s&nbsp;LuaJITem</a>
+a <a
+href="https://www.root.cz/clanky/pohled-pod-kapotu-jvm-zaklady-optimalizace-aplikaci-naprogramovanych-v-jave/">JVM</a>.
+Další odkazy naleznete na konci článku.</div></p>
+
+<p>Existuje i alternativní způsob překlad, tzv.&nbsp;AOT
+(<i>ahead-of-time</i>), který ovšem vyžaduje informovat Numbu o datových typech
+parametrů a proměnných, podobně jako je tomu v&nbsp;Cythonu. Touto
+problematikou se budeme zabývat v&nbsp;samostatném článku (a nutno říci, že
+výhodou Numby je přece jen spíše JIT, než AOT).</p>
+
+
+
+<p><a name="k03"></a></p>
+<h2 id="k03">3. Instalace nástroje Numba</h2>
+
+<p>V&nbsp;současnosti existuje hned několik možností, jak projekt Numba
+nainstalovat. Pravděpodobně nejjednodušší je použití <i>pip</i> neboli Python
+installeru a instalace Numby pouze pro lokálního (přihlášeného) uživatele:</p>
+
+<pre>
+$ <strong>pip3 install --user numba</strong>
+Collecting numba
+  Downloading https://files.pythonhosted.org/packages/1e/74/bcf00816aa212e1439709f88b4e62519b60c89e18eb9f9f67e7d02ab4461/numba-0.38.1-cp36-cp36m-manylinux1_x86_64.whl (1.9MB)
+    100% |████████████████████████████████| 1.9MB 700kB/s 
+Collecting llvmlite&gt;=0.23.0dev0 (from numba)
+  Downloading https://files.pythonhosted.org/packages/21/c7/eb581bbbdf731f24a72eba505cf42668231c595ba61997a6fa186b7f0413/llvmlite-0.23.2-cp36-cp36m-manylinux1_x86_64.whl (15.8MB)
+    100% |████████████████████████████████| 15.8MB 103kB/s 
+Requirement already satisfied: numpy in ./.local/lib/python3.6/site-packages (from numba)
+Installing collected packages: llvmlite, numba
+Successfully installed llvmlite-0.23.2 numba-0.38.1
+</pre>
+
+<p><div class="rs-tip-major">Poznámka: pokud nemáte nainstalovánu knihovnu
+<i>numpy</i>, bude celá instalace delší a bude vyžadovat i překlad nativního
+kódu (to provede <i>pip</i> automaticky, ovšem již nezajistí přítomnost GCC a
+jeho knihoven).</div></p>
+
+<p>Kromě výše uvedeného postupu je možné pro instalaci Numby použít <a
+href="https://www.anaconda.com/what-is-anaconda/">platformu Anaconda</a>
+(nejedná se však o stejně pojmenovaný instalátor Fedory), samozřejmě za
+předpokladu, že ji již máte na svém počítači nakonfigurovanou:</p>
+
+<pre>
+$ <strong>conda install numba</strong>
+</pre>
+
+<p>popř.&nbsp;pro přechod na vyšší verzi:</p>
+
+<pre>
+$ <strong>conda update numba</strong>
+</pre>
+
+<p>Další varianta spočívá v&nbsp;překladu projektu ze zdrojových kódů.
+V&nbsp;tomto případě potřebujete mít nainstalován jak <i>LLVM</i> tak i
+<i>llvmlite</i>, což je knihovna zajišťující rozhraní mezi LLVM a Pythonem:</p>
+
+<pre>
+$ <strong>git clone https://github.com/numba/llvmlite</strong>
+$ <strong>cd llvmlite</strong>
+$ <strong>python setup.py install</strong>
+</pre>
+
+<p>Po tomto přípravném kroku již následuje naklonování repositáře s&nbsp;Numbou
+a její překlad s&nbsp;instalací:</p>
+
+<pre>
+$ <strong>git clone https://github.com/numba/numba.git</strong>
+$ <strong>cd numba</strong>
+$ <strong>pip install -r requirements.txt</strong>
+$ <strong>python setup.py build_ext --inplace</strong>
+$ <strong>python setup.py install</strong>
+</pre>
+
+
+
+<p><a name="k04"></a></p>
+<h2 id="k04">4. Kontrola korektní instalace</h2>
+
+<p>Dalším krokem ihned po instalaci bude zjištění, zda se Numba nainstalovala
+korektně. Prvním pokusem bude pokus o spuštění příkazu <strong>numba</strong>,
+tj.&nbsp;především test, jestli tento příkaz leží na <strong>PATH</strong>:</p>
+
+<pre>
+$ <strong>numba --help</strong>
+&nbsp;
+usage: numba [-h] [--annotate] [--dump-llvm] [--dump-optimized]
+             [--dump-assembly] [--dump-cfg] [--dump-ast]
+             [--annotate-html ANNOTATE_HTML] [-s]
+             [filename]
+&nbsp;
+positional arguments:
+  filename              Python source filename
+&nbsp;
+optional arguments:
+  -h, --help            show this help message and exit
+  --annotate            Annotate source
+  --dump-llvm           Print generated llvm assembly
+  --dump-optimized      Dump the optimized llvm assembly
+  --dump-assembly       Dump the LLVM generated assembly
+  --dump-cfg            [Deprecated] Dump the control flow graph
+  --dump-ast            [Deprecated] Dump the AST
+  --annotate-html ANNOTATE_HTML
+                        Output source annotation as html
+  -s, --sysinfo         Output system information for bug reporting
+</pre>
+
+<p>V&nbsp;případě, že se tento příkaz nepodaří spustit, většinou to znamená, že
+do <strong>PATH</strong> není zahrnuta cesta <strong>~/.local/bin</strong>, což
+lze snadno napravit (.bashrc atd.).</p>
+
+<p>Druhý krok spočívá v&nbsp;pokusu o spuštění dalšího nástroje, který se
+jmenuje <strong>pycc</strong> (varování &bdquo;DEPRECADED&ldquo; si nyní
+nemusíme všímat :-):</p>
+
+<pre>
+$ <strong>pycc --help</strong>
+usage: pycc [-h] [-o OUTPUT] [-c | --llvm] [--header] [--python] [-d]
+            inputs [inputs ...]
+&nbsp;
+DEPRECATED - Compile Python modules to a single shared library
+&nbsp;
+positional arguments:
+  inputs       Input file(s)
+&nbsp;
+optional arguments:
+  -h, --help   show this help message and exit
+  -o OUTPUT    Output file (default is name of first input -- with new ending)
+  -c           Create object file from each input instead of shared-library
+  --llvm       Emit llvm instead of native code
+  --header     Emit C header file with function signatures
+  --python     Emit additionally generated Python wrapper and extension module
+               code in output
+  -d, --debug  Print extra debug information
+</pre>
+
+<p>Třetí krok bude ve skutečnosti nejdůležitější, protože zjistíme, jestli je
+vůbec možné do běžící smyčky REPL naimportovat modul <strong>numba</strong>.
+Korektní instalace bude reagovat takto:</p>
+
+<pre>
+$ <strong>python3</strong>
+&nbsp;
+Python 3.6.3 (default, Oct  9 2017, 12:11:29) 
+[GCC 7.2.1 20170915 (Red Hat 7.2.1-2)] on linux
+Type "help", "copyright", "credits" or "license" for more information.
+&nbsp;
+&gt;&gt;&gt; <strong>import numba</strong>
+&nbsp;
+&gt;&gt;&gt; <strong>numba.sys.version</strong>
+'3.6.3 (default, Oct  9 2017, 12:11:29) \n[GCC 7.2.1 20170915 (Red Hat 7.2.1-2)]'
+</pre>
+
+<p>V&nbsp;případě, že se instalace z&nbsp;nějakého důvodu nepovedla, získáme
+běžné chybové hlášení o neexistujícím modulu:</p>
+
+<pre>
+&gt;&gt;&gt; <strong>import numba</strong>
+&nbsp;
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+ImportError: No module named numba
+</pre>
+
+
+
+<p><a name="k05"></a></p>
+<h2 id="k05">5. Označení funkcí, které se mají překládat JITem</h2>
+
+<p>Použití just-in-time překladače Numba může být ve skutečnosti velmi
+jednoduché. Pokud totiž o nějaké funkci naprogramované v&nbsp;Pythonu víme,
+například na základě použití <i>profileru</i>, že je vhodné jí optimalizovat,
+umístíme před její hlavičku anotaci <strong>@jit</strong>. Tuto anotaci lze
+naimportovat z&nbsp;modulu <strong>numba</strong> (a o existenci tohoto modulu
+jsme se přesvědčili <a href="#k05">v&nbsp;předchozí kapitole</a>). Příklad
+označení funkce vypadá takto:</p>
+
+<pre>
+from numba import jit
+&nbsp;
+<strong>@jit</strong>
+def <strong>funkce1</strong>():
+    pass
+</pre>
+
+<p>Celá aplikace se spouští obvyklým způsobem, což znamená, že &ndash; na
+rozdíl od RPythonu nebo Cythonu &ndash; použijeme přímo interpret
+<strong>python/python2/python3</strong> přesně stejným způsobem, jako bez
+použití Numby.</p>
+
+
+
+<p><a name="k06"></a></p>
+<h2 id="k06">6. Testovací benchmark (dnes již naposledy)</h2>
+
+<p>V&nbsp;dnešním článku se snad již naposledy setkáme s&nbsp;benchmarkem,
+v&nbsp;němž se vykresluje Mandelbrotova množina se zadaným rozlišením a
+s&nbsp;předem nastaveným maximálním počtem iterací. Výsledek výpočtu se vypíše
+na standardní výstup, který bude přesměrován do souboru, protože výsledkem
+výpočtů budou bitmapy ve formátu <i>Portable Pixel Map</i> (viz [<a
+href="https://www.root.cz/clanky/graficke-formaty-ve-znameni-unixu/#k06">1</a>]).
+Na tomto místě si musíme uvědomit, že benchmark kromě rychlosti vlastního
+výpočtu bude měřit i kumulativní čas výpisu hodnot na standardní výstup, který
+mj.&nbsp;znamená nutnost volání knihovních funkcí. Následuje výpis zdrojového
+kódu benchmarku, přičemž kód je napsán tak, aby byl kompatibilní
+s&nbsp;Pythonem 2.x, Pythonem 3.x i Jythonem (a také s&nbsp;Numbou):</p>
+
+<pre>
+<i>#!/usr/bin/env python</i>
+<i># vim: set fileencoding=utf-8</i>
+&nbsp;
+import palette_mandmap
+from sys import argv, exit
+&nbsp;
+def <strong>calc_mandelbrot</strong>(width, height, maxiter, palette):
+    print("P3")
+    print("{w} {h}".format(w=width, h=height))
+    print("255")
+&nbsp;
+    cy = -1.5
+    for y in range(0, height):
+        cx = -2.0
+        for x in range(0, width):
+            zx = 0.0
+            zy = 0.0
+            i = 0
+            while i &lt; maxiter:
+                zx2 = zx * zx
+                zy2 = zy * zy
+                if zx2 + zy2 &gt; 4.0:
+                    break
+                zy = 2.0 * zx * zy + cy
+                zx = zx2 - zy2 + cx
+                i += 1
+&nbsp;
+            r = palette[i][0]
+            g = palette[i][1]
+            b = palette[i][2]
+            print("{r} {g} {b}".format(r=r, g=g, b=b))
+            cx += 3.0/width
+        cy += 3.0/height
+&nbsp;
+&nbsp;
+if __name__ == "__main__":
+    if len(argv) &lt; 4:
+        width = 512
+        height = 512
+        maxiter = 255
+    else:
+        width = int(argv[1])
+        height = int(argv[2])
+        maxiter = int(argv[3])
+    calc_mandelbrot(width, height, maxiter, palette_mandmap.palette)
+</pre>
+
+<img src="https://i.iinfo.cz/images/255/numba-1-1.png" class="image-333205" alt="&#160;" width="512" height="512" />
+<p><i>Obrázek 1: Mandelbrotova množina o rozlišení 512&times;512 pixelů
+vykreslená předchozím příkladem.</i></p>
+
+
+
+<p><a name="k07"></a></p>
+<h2 id="k07">7. Výsledky benchmarku při lineárním zvyšování složitosti výpočtu</h2>
+
+<p>Na rozdíl od předchozích článků nyní budeme benchmark spouštět odlišným
+skriptem, který zajistí (přibližně) lineární zvyšování složitosti. Budeme totiž
+měnit pouze vertikální rozlišení obrázku (výšku) od 0 do 3500 pixelů
+s&nbsp;pevně daným krokem 100 pixelů. Postupné volání benchmarku zajistí tento
+skript (podobný skript bude použit i pro všechny další benchmarky):</p>
+
+<pre>
+width="2048"
+&nbsp;
+OUTFILE="numba1_linear_scale.times"
+PREFIX="numba1_linear_scale"
+&nbsp;
+rm $OUTFILE
+&nbsp;
+for height in $(seq 0 100 3500)
+do
+    echo "${width} x ${height}"
+    echo -n "${height} " &gt;&gt; $OUTFILE
+    /usr/bin/time --output $OUTFILE --append --format "%e %M" python3 mandelbrot_python.py $width $height 255 &gt; "${PREFIX}_${width}_${height}.ppm"
+done
+</pre>
+
+<p>Podívejme se nyní na výsledky. Jen pro zopakování &ndash; prozatím získáme
+výsledky rychlosti výpočtu <i>běžného interpretru Pythonu</i>. Důvod, proč
+tento benchmark vlastně spouštíme, spočívá v&nbsp;tom, aby se ukázaly rozdíly
+mezi časy zahájení výpočtu (rozdíl interpretr versus JIT):</p>
+
+<table>
+<tr><th>Šířka</th><th>Výška</th><th>Čas běhu</th></tr>
+<tr><td>2048</td><td>   0</td><td> 0,03</td></tr>
+<tr><td>2048</td><td> 100</td><td> 1,84</td></tr>
+<tr><td>2048</td><td> 200</td><td> 3,59</td></tr>
+<tr><td>2048</td><td> 300</td><td> 5,56</td></tr>
+<tr><td>2048</td><td> 400</td><td> 7,16</td></tr>
+<tr><td>2048</td><td> 500</td><td> 9,63</td></tr>
+<tr><td>2048</td><td> 600</td><td>11,62</td></tr>
+<tr><td>2048</td><td> 700</td><td>12,56</td></tr>
+<tr><td>2048</td><td> 800</td><td>14,20</td></tr>
+<tr><td>2048</td><td> 900</td><td>16,23</td></tr>
+<tr><td>2048</td><td>1000</td><td>17,91</td></tr>
+<tr><td>2048</td><td>1100</td><td>19,58</td></tr>
+<tr><td>2048</td><td>1200</td><td>23,49</td></tr>
+<tr><td>2048</td><td>1300</td><td>23,08</td></tr>
+<tr><td>2048</td><td>1400</td><td>25,22</td></tr>
+<tr><td>2048</td><td>1500</td><td>26,88</td></tr>
+<tr><td>2048</td><td>1600</td><td>28,87</td></tr>
+<tr><td>2048</td><td>1700</td><td>30,80</td></tr>
+<tr><td>2048</td><td>1800</td><td>33,12</td></tr>
+<tr><td>2048</td><td>1900</td><td>33,82</td></tr>
+<tr><td>2048</td><td>2000</td><td>37,45</td></tr>
+<tr><td>2048</td><td>2100</td><td>37,80</td></tr>
+<tr><td>2048</td><td>2200</td><td>39,46</td></tr>
+<tr><td>2048</td><td>2300</td><td>42,15</td></tr>
+<tr><td>2048</td><td>2400</td><td>44,28</td></tr>
+<tr><td>2048</td><td>2500</td><td>46,78</td></tr>
+<tr><td>2048</td><td>2600</td><td>46,53</td></tr>
+<tr><td>2048</td><td>2700</td><td>48,47</td></tr>
+<tr><td>2048</td><td>2800</td><td>50,65</td></tr>
+<tr><td>2048</td><td>2900</td><td>54,63</td></tr>
+<tr><td>2048</td><td>3000</td><td>53,87</td></tr>
+<tr><td>2048</td><td>3100</td><td>55,37</td></tr>
+<tr><td>2048</td><td>3200</td><td>58,27</td></tr>
+<tr><td>2048</td><td>3300</td><td>59,18</td></tr>
+<tr><td>2048</td><td>3400</td><td>61,80</td></tr>
+<tr><td>2048</td><td>3500</td><td>66,23</td></tr>
+</table>
+
+<p>O tom, že se složitost (a čas výpočtu) skutečně zvětšuje lineárně, se můžeme
+přesvědčit pohledem na následující graf:</p>
+
+<a href="https://www.root.cz/obrazek/333206/"><img src="https://i.iinfo.cz/images/255/numba-1-2-prev.png" class="image-333206" alt="&#160;" width="370" height="187" /></a>
+<p><i>Obrázek 2: Závislost celkové doby výpočtu na vertikálním rozlišení obrázku.</i></p>
+
+
+
+<p><a name="k08"></a></p>
+<h2 id="k08">8. Přidání anotace <strong>@jit</strong></h2>
+
+<p>Prvním krokem při praktickém použití nástroje Numba je zápis anotace
+<strong>@jit</strong> před funkcí, u které potřebujeme, aby ji překladač
+optimalizoval v&nbsp;čase běhu. Nejdříve musíme do příslušného modulu anotaci
+naimportovat, což je snadné:</p>
+
+<pre>
+from numba import jit
+</pre>
+
+<p>Následně tuto anotaci použijeme &ndash; žádné další kroky není zapotřebí
+provést:</p>
+
+<pre>
+<strong>@jit</strong>
+def calc_mandelbrot(width, height, maxiter, palette):
+    ...
+    ...
+    ...
+</pre>
+
+<p><div class="rs-tip-major">Poznámka: výsledky benchmarku si uvedeme až <a
+href="#k11">v&nbsp;jedenácté kapitole</a>, protože bude zajímavé především
+jejich vzájemné porovnání a rozdíly mezi jednotlivými křivkami.</div></p>
+
+
+
+<p><a name="k09"></a></p>
+<h2 id="k09">9. Použití zjednodušené varianty funkce <strong>print</strong></h2>
+
+<p>Jedním z&nbsp;potenciálně problematických prvků našeho benchmarku je použití
+pythonovské funkce <strong>print</strong>. Při JIT překladu totiž může Numba
+použít dvě varianty této funkce &ndash; původní &bdquo;univerzální&ldquo;
+pythonovskou variantu s&nbsp;téměř nepřebernými možnostmi formátování a
+volitelnými parametry nebo zjednodušenou variantu umožňující tisk číselných
+hodnot nebo řetězců (více info o nativních funkcích Numby je uvedeno na stránce
+<a
+href="https://numba.pydata.org/numba-doc/dev/reference/pysupported.html">https://numba.pydata.org/numba-doc/dev/reference/pysupported.html</a>).
+Obecně platí, že pokud použijeme zjednodušenou variantu funkce
+<strong>print</strong>, bude JIT schopen přeložit celou JITovanou funkci do
+strojového kódu.</p>
+
+<p>Náš kód tedy na dvou místech nepatrně upravíme a využijeme tak velké
+flexibility formátu PNM, v&nbsp;němž je možné použít jako oddělovač buď konec
+řádku nebo libovolný bílý znak (jednou z&nbsp;nepříjemných vlastností nativní
+varianty <strong>printu</strong> je to, že se vždy tiskne konec řádku).</p>
+
+<p>Původní kód:</p>
+
+<pre>
+print("P3")
+print("{w} {h}".format(w=width, h=height))
+print("255")
+</pre>
+
+<p>Nový kód:</p>
+
+<pre>
+print("P3")
+print(width)
+print(height)
+print("255")
+</pre>
+
+<p>Původní kód:</p>
+
+<pre>
+r = palette[i][0]
+g = palette[i][1]
+b = palette[i][2]
+print("{r} {g} {b}".format(r=r, g=g, b=b))
+</pre>
+
+<p>Nový kód:</p>
+
+<pre>
+r = palette[i][0]
+g = palette[i][1]
+b = palette[i][2]
+print(r)
+print(g)
+print(b)
+</pre>
+
+<p><div class="rs-tip-major">Poznámka: to, jaká varianta funkce
+<strong>print</strong> se zvolí, nemusíme explicitně zadávat; JIT výběr provede
+za nás.</div></p>
+
+<p>Nová podoba benchmarku tedy bude následující:</p>
+
+<pre>
+<i>#!/usr/bin/env python</i>
+<i># vim: set fileencoding=utf-8</i>
+&nbsp;
+import palette_mandmap
+from sys import argv, exit
+&nbsp;
+from numba import jit
+&nbsp;
+&nbsp;
+@jit
+def <strong>calc_mandelbrot</strong>(width, height, maxiter, palette):
+    print("P3")
+    print(width)
+    print(height)
+    print("255")
+&nbsp;
+    cy = -1.5
+    for y in range(0, height):
+        cx = -2.0
+        for x in range(0, width):
+            zx = 0.0
+            zy = 0.0
+            i = 0
+            while i &lt; maxiter:
+                zx2 = zx * zx
+                zy2 = zy * zy
+                if zx2 + zy2 &gt; 4.0:
+                    break
+                zy = 2.0 * zx * zy + cy
+                zx = zx2 - zy2 + cx
+                i += 1
+&nbsp;
+            r = palette[i][0]
+            g = palette[i][1]
+            b = palette[i][2]
+            print(r)
+            print(g)
+            print(b)
+            cx += 3.0/width
+        cy += 3.0/height
+&nbsp;
+&nbsp;
+if __name__ == "__main__":
+    if len(argv) &lt; 4:
+        width = 512
+        height = 512
+        maxiter = 255
+    else:
+        width = int(argv[1])
+        height = int(argv[2])
+        maxiter = int(argv[3])
+    calc_mandelbrot(width, height, maxiter, palette_mandmap.palette)
+</pre>
+
+<p><div class="rs-tip-major">Poznámka: výsledky benchmarku si opět uvedeme až
+<a href="#k11">v&nbsp;jedenácté kapitole</a>, protože bude zajímavé především
+jejich vzájemné porovnání a rozdíly mezi jednotlivými křivkami.</div></p>
+
+
+
+<p><a name="k10"></a></p>
+<h2 id="k10">10. Vynucení úplného překladu anotací <strong>@jit(nopython=True)</strong></h2>
+
+<p>JIT ve skutečnosti může pracovat ve dvou režimech, které se nazývají
+<i>object mode</i> a <i>nopython mode</i>. V&nbsp;prvním režimu je kód
+vytvářený JITem schopný zpracovat libovolné objekty (resp.&nbsp;reference na
+ně) a v&nbsp;případě potřeby se v&nbsp;kódu volá C API Pythonu pro zpracování
+těchto objektů. Pokud je tento režim použit, nebude se rychlost výsledného
+programu příliš odlišovat od běhu interpretru. Z&nbsp;tohoto důvodu se většinou
+budeme chtít tomuto režimu vyhnout &ndash; pokud to půjde. Naproti tomu druhý
+režim (<i>nopython mode</i>) generuje kód, v&nbsp;němž se C API nevolá a
+všechny proměnné a argumenty nesou hodnoty nativních typů (int, double atd.).
+Tento režim si můžeme vynutit anotací <strong>@jit(nopython=True)</strong>,
+ovšem s&nbsp;několika omezeními, které se týkají například výše zmíněné funkce
+<strong>print</strong> (ostatně si zkuste sami vyzkoušet, co se stane, pokud
+tuto anotaci přidáme do prvního příkladu).</p>
+
+<p>Benchmark upravíme následujícím způsobem:</p>
+
+<pre>
+@jit(nopython=True)
+def <strong>calc_mandelbrot</strong>(width, height, maxiter, palette):
+</pre>
+
+<p>Pro jistotu si uveďme celý kód, jak s&nbsp;novou anotací, tak i
+s&nbsp;použitím zjednodušené nativní funkce <strong>print</strong>:</p>
+
+<pre>
+<i>#!/usr/bin/env python</i>
+<i># vim: set fileencoding=utf-8</i>
+&nbsp;
+import palette_mandmap
+from sys import argv, exit
+&nbsp;
+from numba import jit
+&nbsp;
+&nbsp;
+@jit(nopython=True)
+def <strong>calc_mandelbrot</strong>(width, height, maxiter, palette):
+    print("P3")
+    print(width)
+    print(height)
+    print("255")
+&nbsp;
+    cy = -1.5
+    for y in range(0, height):
+        cx = -2.0
+        for x in range(0, width):
+            zx = 0.0
+            zy = 0.0
+            i = 0
+            while i &lt; maxiter:
+                zx2 = zx * zx
+                zy2 = zy * zy
+                if zx2 + zy2 &gt; 4.0:
+                    break
+                zy = 2.0 * zx * zy + cy
+                zx = zx2 - zy2 + cx
+                i += 1
+&nbsp;
+            r = palette[i][0]
+            g = palette[i][1]
+            b = palette[i][2]
+            print(r)
+            print(g)
+            print(b)
+            cx += 3.0/width
+        cy += 3.0/height
+&nbsp;
+&nbsp;
+if __name__ == "__main__":
+    if len(argv) &lt; 4:
+        width = 512
+        height = 512
+        maxiter = 255
+    else:
+        width = int(argv[1])
+        height = int(argv[2])
+        maxiter = int(argv[3])
+    calc_mandelbrot(width, height, maxiter, palette_mandmap.palette)
+</pre>
+
+
+
+<p><a name="k11"></a></p>
+<h2 id="k11">11. Porovnání výsledků benchmarků (pouze Numba)</h2>
+
+<p>Nyní již máme čtyři verze benchmarků:</p>
+
+<ol>
+<li>Původní zdrojový kód pro klasický interpret Pythonu</li>
+<li>Kód, do něhož byla pouze přidána anotace <strong>@jit</strong></li>
+<li>Varianta s&nbsp;jednodušší (nativní) funkcí <strong>print</strong></li>
+<li>Varianta s&nbsp;jednodušší (nativní) funkcí <strong>print</strong> a anotací <strong>@jit(nopython=True)</strong></li>
+</ol>
+
+<p>Podívejme se na výsledky benchmarků, nejdříve pouze v&nbsp;numerické
+podobě:</p>
+
+<table>
+<tr><th>Šířka</th><th>Výška</th><th>Numba #1/interpret</th><th>Numba #2</th><th>Numba #3</th><th>Numba #4</th></tr>
+<tr><td>2048</td><td>   0</td><td> 0,03</td><td> 0,76</td><td> 5,92</td><td> 5,89</td></tr>
+<tr><td>2048</td><td> 100</td><td> 1,84</td><td> 2,18</td><td> 6,22</td><td> 6,20</td></tr>
+<tr><td>2048</td><td> 200</td><td> 3,59</td><td> 3,56</td><td> 6,60</td><td> 6,58</td></tr>
+<tr><td>2048</td><td> 300</td><td> 5,56</td><td> 4,92</td><td> 6,94</td><td> 6,93</td></tr>
+<tr><td>2048</td><td> 400</td><td> 7,16</td><td> 6,38</td><td> 7,30</td><td> 7,33</td></tr>
+<tr><td>2048</td><td> 500</td><td> 9,63</td><td> 7,90</td><td> 7,64</td><td> 7,67</td></tr>
+<tr><td>2048</td><td> 600</td><td>11,62</td><td> 9,27</td><td> 8,01</td><td> 8,04</td></tr>
+<tr><td>2048</td><td> 700</td><td>12,56</td><td>10,52</td><td> 8,38</td><td> 8,37</td></tr>
+<tr><td>2048</td><td> 800</td><td>14,20</td><td>11,99</td><td> 8,70</td><td> 8,83</td></tr>
+<tr><td>2048</td><td> 900</td><td>16,23</td><td>13,58</td><td> 9,09</td><td> 9,19</td></tr>
+<tr><td>2048</td><td>1000</td><td>17,91</td><td>14,89</td><td> 9,41</td><td> 9,41</td></tr>
+<tr><td>2048</td><td>1100</td><td>19,58</td><td>16,68</td><td> 9,90</td><td> 9,77</td></tr>
+<tr><td>2048</td><td>1200</td><td>23,49</td><td>18,01</td><td>10,19</td><td>10,15</td></tr>
+<tr><td>2048</td><td>1300</td><td>23,08</td><td>19,33</td><td>10,47</td><td>10,57</td></tr>
+<tr><td>2048</td><td>1400</td><td>25,22</td><td>20,30</td><td>11,11</td><td>10,91</td></tr>
+<tr><td>2048</td><td>1500</td><td>26,88</td><td>22,10</td><td>11,24</td><td>11,47</td></tr>
+<tr><td>2048</td><td>1600</td><td>28,87</td><td>23,56</td><td>11,64</td><td>11,55</td></tr>
+<tr><td>2048</td><td>1700</td><td>30,80</td><td>24,73</td><td>11,98</td><td>11,92</td></tr>
+<tr><td>2048</td><td>1800</td><td>33,12</td><td>26,90</td><td>12,51</td><td>12,71</td></tr>
+<tr><td>2048</td><td>1900</td><td>33,82</td><td>28,46</td><td>12,67</td><td>12,84</td></tr>
+<tr><td>2048</td><td>2000</td><td>37,45</td><td>29,40</td><td>13,44</td><td>13,01</td></tr>
+<tr><td>2048</td><td>2100</td><td>37,80</td><td>30,15</td><td>13,52</td><td>13,39</td></tr>
+<tr><td>2048</td><td>2200</td><td>39,46</td><td>32,09</td><td>13,75</td><td>13,81</td></tr>
+<tr><td>2048</td><td>2300</td><td>42,15</td><td>33,15</td><td>14,07</td><td>14,21</td></tr>
+<tr><td>2048</td><td>2400</td><td>44,28</td><td>35,19</td><td>14,31</td><td>14,38</td></tr>
+<tr><td>2048</td><td>2500</td><td>46,78</td><td>36,94</td><td>14,85</td><td>14,84</td></tr>
+<tr><td>2048</td><td>2600</td><td>46,53</td><td>38,30</td><td>15,12</td><td>15,39</td></tr>
+<tr><td>2048</td><td>2700</td><td>48,47</td><td>40,44</td><td>15,56</td><td>15,40</td></tr>
+<tr><td>2048</td><td>2800</td><td>50,65</td><td>40,87</td><td>15,70</td><td>15,96</td></tr>
+<tr><td>2048</td><td>2900</td><td>54,63</td><td>44,21</td><td>16,49</td><td>16,23</td></tr>
+<tr><td>2048</td><td>3000</td><td>53,87</td><td>42,86</td><td>16,78</td><td>16,46</td></tr>
+<tr><td>2048</td><td>3100</td><td>55,37</td><td>45,98</td><td>16,88</td><td>17,18</td></tr>
+<tr><td>2048</td><td>3200</td><td>58,27</td><td>45,04</td><td>17,12</td><td>17,49</td></tr>
+<tr><td>2048</td><td>3300</td><td>59,18</td><td>49,68</td><td>17,68</td><td>17,79</td></tr>
+<tr><td>2048</td><td>3400</td><td>61,80</td><td>53,67</td><td>17,99</td><td>17,84</td></tr>
+<tr><td>2048</td><td>3500</td><td>66,23</td><td>52,20</td><td>18,99</td><td>18,69</td></tr>
+</table>
+
+<p>Přehlednější bude pohled na graf s&nbsp;průběhy výsledků všech čtyř
+benchmarků. Za povšimnutí stojí především to, že pouhým uvedením
+<strong>@jit</strong> jsme žádného výrazného urychlení nedosáhli, takže Numpy
+nemusí ve všech případech produkovat nejlepší kód (zde konkrétně z&nbsp;toho
+důvodu, že JIT používal <i>object mode</i> a nikoli <i>nopython mode</i>). Dále
+si povšimněte, že při náhradě funkce <strong>print</strong> za její jednodušší
+variantu se JIT automaticky přepnul do <i>nopython mode</i>, což se projevilo
+jak delším časem na začátku (oněch cca 5 sekund i pro ty nejkratší skripty),
+tak menším sklonem výsledné křivky. Můžeme zde vidět, že pro často volané
+krátké skripty nemusí být JIT tím nejlepším řešením, zatímco pro náročné
+výpočty je jednoznačně lepší než interpret.</p>
+
+<a href="https://www.root.cz/obrazek/333207/"><img src="https://i.iinfo.cz/images/255/numba-1-3-prev.png" class="image-333207" alt="&#160;" width="370" height="187" /></a>
+<p><i>Obrázek 3: Výsledky všech čtyř benchmarků.</i></p>
+
+
+
+<p><a name="k12"></a></p>
+<h2 id="k12">12. Porovnání s&nbsp;benchmarkem naprogramovaným v&nbsp;optimalizovaném Cythonu a ANSI C</h2>
+
+<p>Nyní již máme výsledky pro oba dva režimy JITu z&nbsp;nástroje Numba. Jak
+ale tento nepochybně užitečný nástroj obstojí v&nbsp;porovnání s&nbsp;Cythonem
+a benchmarkem naprogramovaným v&nbsp;čistém céčku? Odpověď získáme při pohledu
+na následující tabulku, protože i původní benchmarky byly spuštěny novým
+skriptem (s&nbsp;lineárně rostoucí složitostí):</p>
+
+<table>
+<tr><th>Šířka</th><th>Výška</th><th>ANSI C</th><th>Cython #1</th><th>Cython #2</th><th>Cython #3</th><th>Numba #1/interpret</th><th>Numba #2</th><th>Numba #3</th><th>Numba #4</th></tr>
+<tr><td>2048</td><td>   0</td><td>0,00</td><td>0,03</td><td>0,02</td><td>0,03</td><td> 0,03</td><td> 0,76</td><td> 5,92</td><td> 5,89</td></tr>
+<tr><td>2048</td><td> 100</td><td>0,06</td><td>1,03</td><td>0,22</td><td>0,08</td><td> 1,84</td><td> 2,18</td><td> 6,22</td><td> 6,20</td></tr>
+<tr><td>2048</td><td> 200</td><td>0,11</td><td>2,10</td><td>0,42</td><td>0,14</td><td> 3,59</td><td> 3,56</td><td> 6,60</td><td> 6,58</td></tr>
+<tr><td>2048</td><td> 300</td><td>0,17</td><td>3,17</td><td>0,61</td><td>0,21</td><td> 5,56</td><td> 4,92</td><td> 6,94</td><td> 6,93</td></tr>
+<tr><td>2048</td><td> 400</td><td>0,23</td><td>4,04</td><td>0,81</td><td>0,26</td><td> 7,16</td><td> 6,38</td><td> 7,30</td><td> 7,33</td></tr>
+<tr><td>2048</td><td> 500</td><td>0,29</td><td>5,05</td><td>0,99</td><td>0,31</td><td> 9,63</td><td> 7,90</td><td> 7,64</td><td> 7,67</td></tr>
+<tr><td>2048</td><td> 600</td><td>0,34</td><td>6,16</td><td>1,19</td><td>0,37</td><td>11,62</td><td> 9,27</td><td> 8,01</td><td> 8,04</td></tr>
+<tr><td>2048</td><td> 700</td><td>0,40</td><td>7,04</td><td>1,38</td><td>0,43</td><td>12,56</td><td>10,52</td><td> 8,38</td><td> 8,37</td></tr>
+<tr><td>2048</td><td> 800</td><td>0,46</td><td>8,17</td><td>1,56</td><td>0,48</td><td>14,20</td><td>11,99</td><td> 8,70</td><td> 8,83</td></tr>
+<tr><td>2048</td><td> 900</td><td>0,52</td><td>9,51</td><td>1,81</td><td>0,56</td><td>16,23</td><td>13,58</td><td> 9,09</td><td> 9,19</td></tr>
+<tr><td>2048</td><td>1000</td><td>0,58</td><td>10,63</td><td>2,18</td><td>0,60</td><td>17,91</td><td>14,89</td><td> 9,41</td><td> 9,41</td></tr>
+<tr><td>2048</td><td>1100</td><td>0,64</td><td>11,11</td><td>2,24</td><td>0,66</td><td>19,58</td><td>16,68</td><td> 9,90</td><td> 9,77</td></tr>
+<tr><td>2048</td><td>1200</td><td>0,70</td><td>12,48</td><td>2,36</td><td>0,72</td><td>23,49</td><td>18,01</td><td>10,19</td><td>10,15</td></tr>
+<tr><td>2048</td><td>1300</td><td>0,75</td><td>13,09</td><td>2,67</td><td>0,78</td><td>23,08</td><td>19,33</td><td>10,47</td><td>10,57</td></tr>
+<tr><td>2048</td><td>1400</td><td>0,81</td><td>14,26</td><td>2,75</td><td>0,83</td><td>25,22</td><td>20,30</td><td>11,11</td><td>10,91</td></tr>
+<tr><td>2048</td><td>1500</td><td>0,87</td><td>16,19</td><td>3,01</td><td>0,89</td><td>26,88</td><td>22,10</td><td>11,24</td><td>11,47</td></tr>
+<tr><td>2048</td><td>1600</td><td>0,92</td><td>16,83</td><td>3,13</td><td>0,96</td><td>28,87</td><td>23,56</td><td>11,64</td><td>11,55</td></tr>
+<tr><td>2048</td><td>1700</td><td>0,98</td><td>17,41</td><td>3,33</td><td>1,01</td><td>30,80</td><td>24,73</td><td>11,98</td><td>11,92</td></tr>
+<tr><td>2048</td><td>1800</td><td>1,04</td><td>18,25</td><td>3,52</td><td>1,07</td><td>33,12</td><td>26,90</td><td>12,51</td><td>12,71</td></tr>
+<tr><td>2048</td><td>1900</td><td>1,10</td><td>20,10</td><td>3,71</td><td>1,13</td><td>33,82</td><td>28,46</td><td>12,67</td><td>12,84</td></tr>
+<tr><td>2048</td><td>2000</td><td>1,16</td><td>20,80</td><td>3,97</td><td>1,18</td><td>37,45</td><td>29,40</td><td>13,44</td><td>13,01</td></tr>
+<tr><td>2048</td><td>2100</td><td>1,21</td><td>22,08</td><td>4,13</td><td>1,24</td><td>37,80</td><td>30,15</td><td>13,52</td><td>13,39</td></tr>
+<tr><td>2048</td><td>2200</td><td>1,27</td><td>23,65</td><td>4,49</td><td>1,30</td><td>39,46</td><td>32,09</td><td>13,75</td><td>13,81</td></tr>
+<tr><td>2048</td><td>2300</td><td>1,33</td><td>23,51</td><td>4,48</td><td>1,36</td><td>42,15</td><td>33,15</td><td>14,07</td><td>14,21</td></tr>
+<tr><td>2048</td><td>2400</td><td>1,39</td><td>25,66</td><td>4,70</td><td>1,42</td><td>44,28</td><td>35,19</td><td>14,31</td><td>14,38</td></tr>
+<tr><td>2048</td><td>2500</td><td>1,45</td><td>25,77</td><td>5,07</td><td>1,50</td><td>46,78</td><td>36,94</td><td>14,85</td><td>14,84</td></tr>
+<tr><td>2048</td><td>2600</td><td>1,51</td><td>26,98</td><td>5,28</td><td>1,53</td><td>46,53</td><td>38,30</td><td>15,12</td><td>15,39</td></tr>
+<tr><td>2048</td><td>2700</td><td>1,58</td><td>27,82</td><td>5,52</td><td>1,60</td><td>48,47</td><td>40,44</td><td>15,56</td><td>15,40</td></tr>
+<tr><td>2048</td><td>2800</td><td>1,63</td><td>28,56</td><td>5,48</td><td>1,66</td><td>50,65</td><td>40,87</td><td>15,70</td><td>15,96</td></tr>
+<tr><td>2048</td><td>2900</td><td>1,68</td><td>29,92</td><td>5,74</td><td>1,73</td><td>54,63</td><td>44,21</td><td>16,49</td><td>16,23</td></tr>
+<tr><td>2048</td><td>3000</td><td>1,85</td><td>30,59</td><td>6,04</td><td>1,77</td><td>53,87</td><td>42,86</td><td>16,78</td><td>16,46</td></tr>
+<tr><td>2048</td><td>3100</td><td>1,80</td><td>31,48</td><td>6,11</td><td>1,87</td><td>55,37</td><td>45,98</td><td>16,88</td><td>17,18</td></tr>
+<tr><td>2048</td><td>3200</td><td>1,85</td><td>33,32</td><td>6,37</td><td>1,89</td><td>58,27</td><td>45,04</td><td>17,12</td><td>17,49</td></tr>
+<tr><td>2048</td><td>3300</td><td>1,92</td><td>37,60</td><td>6,55</td><td>1,94</td><td>59,18</td><td>49,68</td><td>17,68</td><td>17,79</td></tr>
+<tr><td>2048</td><td>3400</td><td>1,97</td><td>36,76</td><td>6,72</td><td>2,35</td><td>61,80</td><td>53,67</td><td>17,99</td><td>17,84</td></tr>
+<tr><td>2048</td><td>3500</td><td>2,03</td><td>35,78</td><td>6,89</td><td>2,06</td><td>66,23</td><td>52,20</td><td>18,99</td><td>18,69</td></tr>
+</table>
+
+
+
+<p><a name="k13"></a></p>
+<h2 id="k13">13. Graf s&nbsp;výsledky všech benchmarků a zhodnocení výsledků</h2>
+
+<p>Zkusme si nyní vynést výsledky z&nbsp;předchozí tabulky do grafu. Můžeme
+v&nbsp;něm vidět, že průběh pro benchmark naprogramovaný v&nbsp;ANSI C je
+prakticky shodný s&nbsp;Cythonem při volbě nejlepších optimalizací (kterých
+jsme byli schopni). Současně se jedná o nejrychlejší/nejlepší výsledky. Podle
+očekávání je většinou nejpomalejší výpočet provedený interpretrem (CPython),
+ovšem zajímavá je situace na začátku grafu (malá výška obrázků), kde interpret
+překonává Numbu při zapnutí plného JITování. Průběhy Numba #2 a Numba #3 jsou
+opět prakticky shodné, což jsme již diskutovali v&nbsp;předchozích
+kapitolách:</p>
+
+<a href="https://www.root.cz/obrazek/333208/"><img src="https://i.iinfo.cz/images/255/numba-1-4-prev.png" class="image-333208" alt="&#160;" width="370" height="187" /></a>
+<p><i>Obrázek 4: Výsledky všech benchmarků z&nbsp;předchozí tabulky.</i></p>
+
+<p>Stručné zhodnocení pro tento konkrétní benchmark (které ovšem platí i pro
+další programy s&nbsp;převahou výpočtů):</p>
+
+<ol>
+
+<li>S&nbsp;Cythonem je možné dosáhnout nejlepších výsledků, ovšem za cenu
+nutnosti zásahů do kódu (množství <strong>cdef</strong>). Bez těchto zásahů
+bude zrychlení poměrně nevýrazné (hnědý průběh pod žlutým průběhem platným pro
+interpret).</li>
+
+<li>Numba sice nedosahuje tak dobrých výsledků jako optimalizovaný (!) Cython,
+ovšem i při naprosto minimálních zásazích do kódu dokážeme získat rozumné
+výsledky (modrý průběh). Platíme za to prvotní pauzou nutnou pro JITování
+(v&nbsp;našem případě cca pět sekund). Záleží na povaze aplikace, jestli je
+toto zpomalení významné či nikoli (malé skripty versus serverové aplikace
+například).</li>
+
+</ol>
+
+
+
+<p><a name="k14"></a></p>
+<h2 id="k14">14. Explicitně zapsané informace o typech (typové signatury)</h2>
+
+<p>I při použití Numby je možné (a to zcela volitelně) informovat just-in-time
+překladač o typech proměnných, argumentů funkcí či návratových typech funkcí.
+Z&nbsp;primitivních datových typů se jedná především o různé typy numerických
+hodnot (+ pravdivostní hodnota). Ty jsou shrnuty v&nbsp;následující
+tabulce:</p>
+
+<table>
+<tr><th>Kanonické jméno</th><th>Zkratka</th><th>Datový typ</th></tr>
+<tr><td>numba.boolean</td><td>numba.b1</td><td>byte</td></tr>
+<tr><td>numba.uint8, numba.byte</td><td>numba.u1</td><td>8-bit unsigned byte</td></tr>
+<tr><td>numba.uint16</td><td>numba.u2</td><td>16-bit unsigned integer</td></tr>
+<tr><td>numba.uint32</td><td>numba.u4</td><td>32-bit unsigned integer</td></tr>
+<tr><td>numba.uint64</td><td>numba.u8</td><td>64-bit unsigned integer</td></tr>
+<tr><td>numba.int8, numba.char</td><td>numba.i1</td><td>8-bit signed byte</td></tr>
+<tr><td>numba.int16</td><td>numba.i2</td><td>16-bit signed integer</td></tr>
+<tr><td>numba.int32</td><td>numba.i4</td><td>32-bit signed integer</td></tr>
+<tr><td>numba.int64</td><td>numba.i8</td><td>64-bit signed integer</td></tr>
+<tr><td>numba.intc</td><td>&times;</td><td>C int-sized integer</td></tr>
+<tr><td>numba.uintc</td><td>&times;</td><td>C int-sized unsigned integer</td></tr>
+<tr><td>numba.intp</td><td>&times;</td><td>pointer-sized integer</td></tr>
+<tr><td>numba.uintp</td><td>&times;</td><td>pointer-sized unsigned integer</td></tr>
+<tr><td>numba.float32</td><td>numba.f4</td><td>single-precision floating-point number</td></tr>
+<tr><td>numba.float64, numba.double</td><td>numba.f8</td><td>double-precision floating-point number</td></tr>
+<tr><td>numba.complex64</td><td>numba.c8</td><td>single-precision complex number</td></tr>
+<tr><td>numba.complex128</td><td>numba.c16</td><td>double-precision complex number</td></tr>
+</table>
+
+<p>Tyto typy použijeme ve chvíli, kdy se namísto JIT používá AOT (viz druhou
+kapitolu), popř.&nbsp;je uvidíme při ladění aplikací. Příklad použití (převzatý
+přímo z&nbsp;dokumentace a mírně upravený) ukazuje, že signaturu lze použít i
+vícekrát, protože funkce mohou akceptovat více typů parametrů (přeloží se potom
+několikrát):</p>
+
+<pre>
+@cc.export('addf', 'f8(f8, f8)')
+@cc.export('addi', 'i4(i4, i4)')
+@cc.export('addl', 'i8(i8, i8)')
+def <strong>add</strong>(a, b):
+    return a * b
+&nbsp;
+@cc.export('square', 'f8(f8)')
+def <strong>square</strong>(a):
+    return a ** 2
+</pre>
+
+
+
+<p><a name="k15"></a></p>
+<h2 id="k15">15. Specifikace typů polí</h2>
+
+<p>Specifikovat je možné i typy polí resp.&nbsp;přesněji řečeno typy prvků
+ukládaných do pole. Pole jsou totiž po překladu do strojového kódu homogenní
+datovou strukturou, na rozdíl od běžných Pythonovských seznamů. Příklady
+deklarace polí různých typů jsou uvedeny v&nbsp;následující tabulce:</p>
+
+<table>
+<tr><th>Deklarace</th><th>Vrátí se</th><th>Význam</th></tr>
+<tr><td>numba.byte[:]</td><td>array(uint8, 1d, A)</td><td>jednorozměrné pole bajtů</td></tr>
+<tr><td>numba.byte[::1]</td><td>array(uint8, 1d, C)</td><td>souvislé jednorozměrné pole bajtů</td></tr>
+<tr><td>numba.float32[:]</td><td>array(float32, 1d, A)</td><td>jednorozměrné pole s&nbsp;prvky typu float (jednoduchá přesnost)</td></tr>
+<tr><td>numba.int16[:, :]</td><td>array(int16, 2d, A)</td><td>dvourozměrné pole 16bitových celých čísel</td></tr>
+<tr><td>numba.uintp[:, :, :]</td><td>array(uint64, 3d, A)</td><td>trojrozměrné pole ukazatelů</td></tr>
+<tr><td>numba.float32[:, :, ::1]</td><td>array(float32, 3d, C)</td><td>souvislé trojrozměrné pole (céčková organizace)</td></tr>
+<tr><td>numba.float32[::1, :, :]</td><td>array(float32, 3d, F)</td><td>souvislé trojrozměrné pole (organizace podle Fortranu)</td></tr>
+<tr><td>numba.float32[:, ::1, :]</td><td>array(float32, 3d, A)</td><td>trojrozměrné pole</td></tr>
+</table>
+
+<p>Souvislá pole odpovídají céčkovým polím &ndash; prvky jsou v&nbsp;nich
+uloženy v&nbsp;kontinuálním bloku paměti.</p>
+
+<p>V&nbsp;dalších dílech si ukážeme, jak lze v&nbsp;Numba používat pole
+odpovídající konvencím známé knihovny Numpy.</p>
+
+
+
+<p><a name="k16"></a></p>
+<h2 id="k16">16. Obsah druhé části článku</h2>
+
+<p>Ve druhé části článku si ukážeme především interní procesy, které Numba
+provádí při JITování kódu. Setkáme se tedy s&nbsp;projektem LLVM, který je
+velmi populární, a to v&nbsp;mnoha oblastech (stačí jen připomenout zajímavý
+projekt <i>Emscripten</i> atd.).</p>
+
+
+
+<p><a name="k17"></a></p>
+<h2 id="k17">17. Repositář s&nbsp;demonstračními příklady a výsledky benchmarků</h2>
+
+<p>Všechny skripty, které jsme si v&nbsp;dnešním článku ukázali, naleznete na
+adrese <a
+href="https://github.com/tisnik/rpython-examples">https://github.com/tisnik/numba-examples</a>.
+Následují odkazy na jednotlivé příklady (pro jejich spuštění je nutné mít
+nainstalovánu knihovnu a jeho závislosti &ndash; viz <a href="#k03">třetí
+kapitolu</a>):</p>
+
+<table>
+<tr><th>#</th><th>Příklad</th><th>Adresa</th></tr>
+<tr><td>1</td><td>mandelbrot-v1</td><td><a href="https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v1">https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v1</a></td></tr>
+<tr><td>2</td><td>mandelbrot-v2</td><td><a href="https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v2">https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v2</a></td></tr>
+<tr><td>3</td><td>mandelbrot-v3</td><td><a href="https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v3">https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v3</a></td></tr>
+<tr><td>4</td><td>mandelbrot-v4</td><td><a href="https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v4">https://github.com/tisnik/numba-examples/tree/master/mandelbrot-v4</a></td></tr>
+</table>
+
+<p>Výsledky benchmarků (prosté textové soubory určené pro další zpracování)
+jsou &bdquo;rozházeny&ldquo; mezi tři repositáře, což je ale pochopitelné,
+protože jsme benchmarky spouštěli s&nbsp;využitím rozdílných nástrojů:</p>
+
+<table>
+<tr><th>#</th><th>Výsledek pro</th><th>Adresa</th></tr>
+<tr><td>1</td><td>ANSI C</td><td><a href="https://github.com/tisnik/rpython-examples/blob/master/benchmarks/mandelbrot/c/ansi_c_linear_scale.times">https://github.com/tisnik/rpython-examples/blob/master/benchmarks/mandelbrot/c/ansi_c_linear_scale.times</a></td></tr>
+<tr><td>2</td><td>Cython bez optimalizací</td><td><a href="https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v1/cython_linear_scale.times">https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v1/cython_linear_scale.times</a></td></tr>
+<tr><td>3</td><td>Cython s type hinty</td><td><a href="https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v2/cython_linear_scale.times">https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v2/cython_linear_scale.times</a></td></tr>
+<tr><td>4</td><td>Cython plně optimalizovaný</td><td><a href="https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v3/cython_linear_scale.times">https://github.com/tisnik/cython-examples/blob/master/mandelbrot/v3/cython_linear_scale.times</a></td></tr>
+<tr><td>5</td><td>Numba základní varianta</td><td><a href="https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v2/numba2_linear_scale.times">https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v2/numba2_linear_scale.times</a></td></tr>
+<tr><td>6</td><td>Numba s vylepšeným print</td><td><a href="https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v3/numba3_linear_scale.times">https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v3/numba3_linear_scale.times</a></td></tr>
+<tr><td>7</td><td>Numba s plným JITem</td><td><a href="https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v4/numba4_linear_scale.times">https://github.com/tisnik/numba-examples/blob/master/mandelbrot-v4/numba4_linear_scale.times</a></td></tr>
+</table>
+
+
+
+<p><a name="k18"></a></p>
+<h2 id="k18">18. Odkazy na Internetu</h2>
+
+<ol>
+
+<li>Numba<br />
+<a href="http://numba.pydata.org/">http://numba.pydata.org/</a>
+</li>
+
+<li>numba 0.38.1<br />
+<a href="https://pypi.org/project/numba/">https://pypi.org/project/numba/</a>
+</li>
+
+<li>Numba documentation<br />
+<a href="http://numba.pydata.org/numba-doc/latest/index.html">http://numba.pydata.org/numba-doc/latest/index.html</a>
+</li>
+
+<li>Numba na GitHubu<br />
+<a href="https://github.com/numba/numba">https://github.com/numba/numba</a>
+</li>
+
+<li>First Steps with numba<br />
+<a href="https://numba.pydata.org/numba-doc/0.12.2/tutorial_firststeps.html">https://numba.pydata.org/numba-doc/0.12.2/tutorial_firststeps.html</a>
+</li>
+
+<li>Numba and types<br />
+<a href="https://numba.pydata.org/numba-doc/0.12.2/tutorial_types.html">https://numba.pydata.org/numba-doc/0.12.2/tutorial_types.html</a>
+</li>
+
+<li>Just-in-time compilation<br />
+<a href="https://en.wikipedia.org/wiki/Just-in-time_compilation">https://en.wikipedia.org/wiki/Just-in-time_compilation</a>
+</li>
+
+<li>Cython (home page)<br />
+<a href="http://cython.org/">http://cython.org/</a>
+</li>
+
+<li>Cython (wiki)<br />
+<a href="https://github.com/cython/cython/wiki">https://github.com/cython/cython/wiki</a>
+</li>
+
+<li>Cython (Wikipedia)<br />
+<a href="https://en.wikipedia.org/wiki/Cython">https://en.wikipedia.org/wiki/Cython</a>
+</li>
+
+<li>Cython (GitHub)<br />
+<a href="https://github.com/cython/cython">https://github.com/cython/cython</a>
+</li>
+
+<li>Python Implementations: Compilers<br />
+<a href="https://wiki.python.org/moin/PythonImplementations#Compilers">https://wiki.python.org/moin/PythonImplementations#Compilers</a>
+</li>
+
+<li>EmbeddingCython<br />
+<a href="https://github.com/cython/cython/wiki/EmbeddingCython">https://github.com/cython/cython/wiki/EmbeddingCython</a>
+</li>
+
+<li>The Basics of Cython<br />
+<a href="http://docs.cython.org/en/latest/src/tutorial/cython_tutorial.html">http://docs.cython.org/en/latest/src/tutorial/cython_tutorial.html</a>
+</li>
+
+<li>Overcoming Python's GIL with Cython<br />
+<a href="https://lbolla.info/python-threads-cython-gil">https://lbolla.info/python-threads-cython-gil</a>
+</li>
+
+<li>GlobalInterpreterLock<br />
+<a href="https://wiki.python.org/moin/GlobalInterpreterLock">https://wiki.python.org/moin/GlobalInterpreterLock</a>
+</li>
+
+<li>The Magic of RPython<br />
+<a href="https://refi64.com/posts/the-magic-of-rpython.html">https://refi64.com/posts/the-magic-of-rpython.html</a>
+</li>
+
+<li>RPython: Frequently Asked Questions<br />
+<a href="http://rpython.readthedocs.io/en/latest/faq.html">http://rpython.readthedocs.io/en/latest/faq.html</a>
+</li>
+
+<li>RPython’s documentation<br />
+<a href="http://rpython.readthedocs.io/en/latest/index.html">http://rpython.readthedocs.io/en/latest/index.html</a>
+</li>
+
+<li>RPython (Wikipedia)<br />
+<a href="https://en.wikipedia.org/wiki/PyPy#RPython">https://en.wikipedia.org/wiki/PyPy#RPython</a>
+</li>
+
+<li>Getting Started with RPython<br />
+<a href="http://rpython.readthedocs.io/en/latest/getting-started.html">http://rpython.readthedocs.io/en/latest/getting-started.html</a>
+</li>
+
+<li>PyPy (home page)<br />
+<a href="https://pypy.org/">https://pypy.org/</a>
+</li>
+
+<li>PyPy (dokumentace)<br />
+<a href="http://doc.pypy.org/en/latest/">http://doc.pypy.org/en/latest/</a>
+</li>
+
+<li>Localized Type Inference of Atomic Types in Python (2005)<br />
+<a href="http://citeseer.ist.psu.edu/viewdoc/summary?doi=10.1.1.90.3231">http://citeseer.ist.psu.edu/viewdoc/summary?doi=10.1.1.90.3231</a>
+</li>
+
+<li>Tutorial: Writing an Interpreter with PyPy, Part 1<br />
+<a href="https://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html">https://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html</a>
+</li>
+
+<li>List of numerical analysis software<br />
+<a href="https://en.wikipedia.org/wiki/List_of_numerical_analysis_software">https://en.wikipedia.org/wiki/List_of_numerical_analysis_software</a>
+</li>
+
+<li>Pixie: lehký skriptovací jazyk s „kouzelnými“ schopnostmi<br />
+<a href="https://www.root.cz/clanky/pixie-lehky-skriptovaci-jazyk-s-kouzelnymi-schopnostmi/">https://www.root.cz/clanky/pixie-lehky-skriptovaci-jazyk-s-kouzelnymi-schopnostmi/</a>
+</li>
+
+<li>Programovací jazyk Pixie: funkce ze základní knihovny a použití FFI<br />
+<a href="https://www.root.cz/clanky/programovaci-jazyk-pixie-funkce-ze-zakladni-knihovny-a-pouziti-ffi/">https://www.root.cz/clanky/programovaci-jazyk-pixie-funkce-ze-zakladni-knihovny-a-pouziti-ffi/</a>
+</li>
+
+<li>The future can be written in RPython now (článek z&nbsp;roku 2010)<br />
+<a href="http://blog.christianperone.com/2010/05/the-future-can-be-written-in-rpython-now/">http://blog.christianperone.com/2010/05/the-future-can-be-written-in-rpython-now/</a>
+</li>
+
+<li>PyPy is the Future of Python (článek z&nbsp;roku 2010)<br />
+<a href="https://alexgaynor.net/2010/may/15/pypy-future-python/">https://alexgaynor.net/2010/may/15/pypy-future-python/</a>
+</li>
+
+<li>Portal:Python programming<br />
+<a href="https://en.wikipedia.org/wiki/Portal:Python_programming">https://en.wikipedia.org/wiki/Portal:Python_programming</a>
+</li>
+
+<li>RPython Frontend and C Wrapper Generator<br />
+<a href="http://www.codeforge.com/article/383293">http://www.codeforge.com/article/383293</a>
+</li>
+
+<li>PyPy’s Approach to Virtual Machine Construction<br />
+<a href="https://bitbucket.org/pypy/extradoc/raw/tip/talk/dls2006/pypy-vm-construction.pdf">https://bitbucket.org/pypy/extradoc/raw/tip/talk/dls2006/pypy-vm-construction.pdf</a>
+</li>
+
+<li>Tutorial: Writing an Interpreter with PyPy, Part 1<br />
+<a href="https://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html">https://morepypy.blogspot.com/2011/04/tutorial-writing-interpreter-with-pypy.html</a>
+</li>
+
+<li>A simple interpreter from scratch in Python (part 1)<br />
+<a href="http://www.jayconrod.com/posts/37/a-simple-interpreter-from-scratch-in-python-part-1">http://www.jayconrod.com/posts/37/a-simple-interpreter-from-scratch-in-python-part-1</a>
+</li>
+
+<li>Brainfuck Interpreter in Python<br />
+<a href="https://helloacm.com/brainfuck-interpreter-in-python/">https://helloacm.com/brainfuck-interpreter-in-python/</a>
+</li>
+
+<li>Interpretry, překladače, JIT překladače a transpřekladače programovacího jazyka Lua<br />
+<a href="https://www.root.cz/clanky/interpretry-prekladace-jit-prekladace-a-transprekladace-programovaciho-jazyka-lua/">https://www.root.cz/clanky/interpretry-prekladace-jit-prekladace-a-transprekladace-programovaciho-jazyka-lua/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (2)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-2/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-2/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (3)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-3/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-3/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (4)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-4/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-4/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (5 – tabulky a pole)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-5-tabulky-a-pole/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-5-tabulky-a-pole/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (6 – překlad programových smyček do mezijazyka LuaJITu)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-6-preklad-programovych-smycek-do-mezijazyka-luajitu/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-6-preklad-programovych-smycek-do-mezijazyka-luajitu/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (7 – dokončení popisu mezijazyka LuaJITu)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-7-dokonceni-popisu-mezijazyka-luajitu/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-7-dokonceni-popisu-mezijazyka-luajitu/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (8 – základní vlastnosti trasovacího JITu)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-8-zakladni-vlastnosti-trasovaciho-jitu/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-8-zakladni-vlastnosti-trasovaciho-jitu/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (9 – další vlastnosti trasovacího JITu)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-9-dalsi-vlastnosti-trasovaciho-jitu/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-9-dalsi-vlastnosti-trasovaciho-jitu/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (10 – JIT překlad do nativního kódu)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-10-jit-preklad-do-nativniho-kodu/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-10-jit-preklad-do-nativniho-kodu/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (11 – JIT překlad do nativního kódu procesorů s architekturami x86 a ARM)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-11-jit-preklad-do-nativniho-kodu-procesoru-s-architekturami-x86-a-arm/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-11-jit-preklad-do-nativniho-kodu-procesoru-s-architekturami-x86-a-arm/</a>
+</li>
+
+<li>LuaJIT – Just in Time překladač pro programovací jazyk Lua (12 – překlad operací s reálnými čísly)<br />
+<a href="https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-12-preklad-operaci-s-realnymi-cisly/">https://www.root.cz/clanky/luajit-just-in-time-prekladac-pro-programovaci-jazyk-lua-12-preklad-operaci-s-realnymi-cisly/</a>
+</li>
+
+</ol>
+
+
+
+<p></p><p></p>
+<p><small>Autor: <a href="http://www.fit.vutbr.cz/~tisnovpa">Pavel Tišnovský</a> &nbsp; 2018</small></p>
+</body>
+</html>
+
